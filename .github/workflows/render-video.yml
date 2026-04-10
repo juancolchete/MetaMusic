@@ -1,0 +1,47 @@
+name: Generate Lyrics Videos
+
+on:
+  push:
+    paths:
+      - 'inputs/*.lrc'
+  workflow_dispatch:
+
+jobs:
+  build-videos:
+    name: Render MP4 from LRC
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Install System Dependencies (FFmpeg)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg
+
+      - name: Render Videos
+        run: |
+          mkdir -p outputs
+          
+          # Make the script executable just in case permissions weren't pushed
+          chmod +x scripts/generate_vid.sh
+          
+          for lrc_file in inputs/*.lrc; do
+            # Skip if glob fails to match
+            [ -e "$lrc_file" ] || continue 
+            
+            # Extract filename without extension
+            filename=$(basename -- "$lrc_file")
+            filename="${filename%.*}"
+            
+            # Execute the bash script
+            ./scripts/generate_vid.sh "$lrc_file" "outputs/${filename}.mp4"
+          done
+
+      - name: Upload Video Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: silent-karaoke-videos
+          path: outputs/*.mp4
+          retention-days: 7
