@@ -3,7 +3,7 @@ name: Generate Lyrics Videos
 on:
   push:
     paths:
-      - 'inputs/*.lrc'
+      - 'lyrics/*.lrc' # Pipeline triggers when files in the lyrics directory change
   workflow_dispatch:
 
 jobs:
@@ -27,7 +27,8 @@ jobs:
           # Make the script executable just in case permissions weren't pushed
           chmod +x scripts/generate_vid.sh
           
-          for lrc_file in inputs/*.lrc; do
+          # Iterate over all LRC files in the lyrics directory
+          for lrc_file in lyrics/*.lrc; do
             # Skip if glob fails to match
             [ -e "$lrc_file" ] || continue 
             
