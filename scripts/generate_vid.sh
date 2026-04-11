@@ -30,10 +30,134 @@ BEGIN {
     print ""
     print "[V4+ Styles]"
     print "Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding"
-    # Primary: Yellow (sung word); Secondary: White (upcoming words)
     print "Style: Default,Arial,32,&H0000FFFF,&H00FFFFFF,&H00000000,&H00000000,1,0,0,0,100,100,0,0,1,2,0,5,10,10,10,1"
     print ""
     print "[Events]"
+    print "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text"
+    count = 0
+}
+{
+    if ($0 !~ /^\[[0-9]+:[0-9]+\.[0-9]+\]/) next;
+
+    split($0, parts, "]");
+    time_str = substr(parts[1], 2);
+    text_str = substr($0, length(parts[1]) + 2);
+    
+    sub(/^[ \t]+/, "", text_str);
+    sub(/[ \t]+$/, "", text_str);
+
+    split(time_str, t, ":");
+    min = t[1] + 0;
+    sec = t[2] + 0;
+    curr_total_sec = (min * 60) + sec;
+
+    h = int(min / 60);
+    m = min % 60;
+    start_time = sprintf("%d:%02d:%05.2f", h, m, sec);
+
+    if (count > 0 && prev_text != "") {
+        duration_sec = curr_total_sec - prev_total_sec;
+        words_count = split(prev_text, w, " ");
+        if (words_count > 0) {
+            highlight_duration = duration_sec;
+            if (highlight_duration > 5) highlight_duration = 5;
+            
+            time_per_word_cs = int((highlight_duration * 100) / words_count);
+            
+            k_text = "";
+            for (i=1; i<=words_count; i++) {
+                k_text = k_text "{\\kf" time_per_word_cs "}" w[i] " ";
+            }
+            print "Dialogue: 0," prev_start "," start_time ",Default,,0,0,0,," k_text;
+        }
+    }
+
+    prev_start = start_time;
+    prev_total_sec = curr_total_sec;
+    prev_text = text_str;
+    last_sec = sec;
+    last_min = min;
+    count++;
+}
+END {
+    if (count == 0) exit;
+
+    end_sec = last_sec + 5;
+    end_min = last_min;
+    if (end_sec >= 60) {
+        end_min += int(end_sec / 60);
+        end_sec = end_sec % 60;
+    }
+    
+    h = int(end_min / 60);
+    m = end_min % 60;
+    end_time = sprintf("%d:%02d:%05.2f", h, m, end_sec);
+
+    if (prev_text != "") {
+        words_count = split(prev_text, w, " ");
+        time_per_word_cs = int((5 * 100) / words_count); 
+        k_text = "";
+        for (i=1; i<=words_count; i++) {
+            k_text = k_text "{\\kf" time_per_word_cs "}" w[i] " ";
+        }
+        print "Dialogue: 0," prev_start "," end_time ",Default,,0,0,0,," k_text;
+    }
+
+    total_duration = end_min * 60 + end_sec + 3;
+    print total_duration > "'"$DURATION_FILE"'";
+}
+' "$LRC_FILE" > "$ASS_FILE"
+
+DURATION=$(cat "$DURATION_FILE")
+rm -f "$DURATION_FILE"
+
+if [ -z "$DURATION" ]; then
+    echo "Error: Could not calculate duration."
+    exit 1
+fi
+
+# Calculamos os frames totais para garantir que a animação dure o vídeo inteiro
+# Aumentamos ligeiramente o END_PTS para evitar que a animação pare no último segundo
+FPS=25
+TOTAL_FRAMES=$(awk "BEGIN {print int($DURATION * $FPS) + 50}")
+
+echo "Video duration: $DURATION s | Animation frames: $TOTAL_FRAMES"
+
+# 2. Render Video
+if [ -f "$AUDIO_FILE" ]; then
+    echo "Audio file found. Generating Spectrogram..."
+    ffmpeg -y -i "$AUDIO_FILE" -filter_complex "[0:a]showspectrum=s=1920x1080:mode=combined:color=fire:slide=scroll:scale=cbrt[bg]; [bg]ass='${ASS_FILE}'[v]" -map "[v]" -map 0:a -c:v libx264 -preset ultrafast -crf 28 -pix_fmt yuv420p -c:a aac "$OUT_MP4"
+else
+    echo "Procedural generation: Hall of Mirrors Tunnel..."
+    
+    HASH=$(sha256sum "$LRC_FILE" | awk '{print substr($1, 1, 6)}')
+    HEX_X=$(echo "${HASH}" | awk '{print substr($1, 1, 3)}')
+    HEX_Y=$(echo "${HASH}" | awk '{print substr($1, 4, 3)}')
+    START_X=$(awk "BEGIN {print ((0x$HEX_X) / 4095 * 4) - 2}")
+    START_Y=$(awk "BEGIN {print ((0x$HEX_Y) / 4095 * 4) - 2}")
+
+    # Ajustamos end_scale para 0.0005 (profundo, mas evita o congelamento por limite de precisão)
+    # Adicionamos r=25 para garantir cadência constante
+    ffmpeg -y \
+        -t "${DURATION}" \
+        -f lavfi -i "mandelbrot=s=960x540:r=25:maxiter=100:start_x=${START_X}:start_y=${START_Y}:end_pts=${TOTAL_FRAMES}:end_scale=0.0005" \
+        -filter_complex \
+        "[0:v]split[v1][v2]; \
+         [v1]vflip[top]; \
+         [v2]hflip[bottom]; \
+         [top][bottom]vstack,split[left][right_pre]; \
+         [right_pre]hflip[right]; \
+         [left][right]hstack,scale=1920:1080,ass='${ASS_FILE}'[v]" \
+        -map "[v]" \
+        -c:v libx264 \
+        -preset ultrafast \
+        -crf 26 \
+        -pix_fmt yuv420p \
+        -an \
+        "$OUT_MP4"
+fi
+
+echo "Success! Video saved to $OUT_MP4"
     print "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text"
     count = 0
 }
