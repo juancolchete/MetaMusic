@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Specialists handle input validation
 if [ "$#" -ne 2 ]; then
     echo "Usage: $0 <input.lrc> <output.mp4>"
     exit 1
@@ -9,9 +10,10 @@ fi
 LRC_FILE="$1"
 OUT_MP4="$2"
 
-# Extract filename to check for matching audio
 BASENAME=$(basename -- "$LRC_FILE")
 FILENAME="${BASENAME%.*}"
+
+# Optional inputs (Ternary logic priority)
 AUDIO_FILE="audio/${FILENAME}.mp3"
 
 ASS_FILE="${LRC_FILE%.*}.ass"
@@ -19,16 +21,17 @@ DURATION_FILE=$(mktemp)
 
 echo "Processing: $LRC_FILE..."
 
-# 1. Parse LRC and generate ASS file with Karaoke tags
+# 1. Parse LRC and generate ASS file (Standard Karaoke logic - Unchanged)
 awk '
 BEGIN {
     print "[Script Info]"
-    print "Title: Silent Karaoke"
+    print "Title: Procedural Tunnel Karaoke"
     print "ScriptType: v4.00+"
     print "PlayDepth: 0"
     print ""
     print "[V4+ Styles]"
     print "Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding"
+    # Specialist Note: Primary (Glow Yellow), Secondary (Flat White), Outline (Black)
     print "Style: Default,Arial,32,&H0000FFFF,&H00FFFFFF,&H00000000,&H00000000,1,0,0,0,100,100,0,0,1,2,0,5,10,10,10,1"
     print ""
     print "[Events]"
@@ -59,6 +62,7 @@ BEGIN {
         words_count = split(prev_text, w, " ");
         if (words_count > 0) {
             highlight_duration = duration_sec;
+            # Cap long lines
             if (highlight_duration > 5) highlight_duration = 5;
             
             time_per_word_cs = int((highlight_duration * 100) / words_count);
@@ -117,30 +121,44 @@ fi
 
 echo "Video duration set to: $DURATION seconds"
 
-# 2. Render Video based on Audio presence
+# 2. Render Video
 if [ -f "$AUDIO_FILE" ]; then
-    echo "Audio file found: $AUDIO_FILE. Generating Spectrogram background..."
-    
-    # Generate a scrolling spectrogram and overlay ASS subtitles
+    echo "Audio file found: $AUDIO_FILE. Generating dynamic spectrogram background..."
+    # Specialist Note: Spectrogram remains the highest priority visual fallback
     ffmpeg -y \
         -i "$AUDIO_FILE" \
-        -filter_complex \
-        "[0:a]showspectrum=s=1920x1080:mode=combined:color=fire:slide=scroll:scale=cbrt[bg]; \
-         [bg]ass='${ASS_FILE}'[v]" \
-        -map "[v]" -map 0:a \
-        -c:v libx264 -pix_fmt yuv420p \
-        -c:a aac \
-        "$OUT_MP4" > /dev/null 2>&1
+        -filter_complex "[0:a]showspectrum=s=1920x1080:mode=combined:color=fire:slide=scroll:scale=cbrt[bg]; [bg]ass='${ASS_FILE}'[v]" \
+        -map "[v]" -map 0:a -c:v libx264 -pix_fmt yuv420p -c:a aac "$OUT_MP4" > /dev/null 2>&1
 else
-    # Generate a unique HEX color by hashing the lyrics file contents
-    HEX_COLOR=$(sha256sum "$LRC_FILE" | awk '{print substr($1, 1, 6)}')
-    echo "No audio file found. Generated unique background color based on lyrics: #$HEX_COLOR"
+    echo "No audio found. Procedurally generating hypnotic Mandelbrot Hall of Mirrors background using code..."
     
+    # Generate unique start coordinates from lyrics content hash (Deterministic Randomness)
+    # sha256 -> HEX(6) -> Normalize to mathematical range [-2.0, 2.0]
+    HASH=$(sha256sum "$LRC_FILE" | awk '{print substr($1, 1, 6)}')
+    HEX_X=$(echo "${HASH}" | awk '{print substr($1, 1, 3)}')
+    HEX_Y=$(echo "${HASH}" | awk '{print substr($1, 4, 3)}')
+    DEC_X=$((0x${HEX_X}))
+    DEC_Y=$((0x${HEX_Y}))
+    
+    # Normalized coords [-2.0, 2.0]
+    START_X=$(awk "BEGIN {print ($DEC_X / 4095.0 * 4.0) - 2.0}")
+    START_Y=$(awk "BEGIN {print ($DEC_Y / 4095.0 * 4.0) - 2.0}")
+    
+    echo "Lyrics hash: #$HASH -> Seed Coords: ($START_X, $START_Y)"
+
+    # Procedural Rendering Pipeline:
+    # 1. source: mandelbrot (generated in memory)
+    # 2. filter_complex:
+    #    - zoompan: Animates the fractal depth over time ('zoom+0.001') to simulate infinite forward motion.
+    #    - ass: Burns the timed lyrics over the Mandelbrot tunnel.
     ffmpeg -y \
-        -f lavfi \
-        -i "color=c=0x${HEX_COLOR}:s=1920x1080:d=${DURATION}" \
-        -vf "ass='${ASS_FILE}'" \
-        -c:v libx264 -pix_fmt yuv420p \
+        -f lavfi -i mandelbrot=s=1920x1080:d=${DURATION}:maxiter=200:start_x=${START_X}:start_y=${START_Y} \
+        -filter_complex \
+        "[0:v]zoompan=z='zoom+0.001':x='x':y='y':s=1920x1080[depth]; \
+         [depth]ass='${ASS_FILE}'[v]" \
+        -map "[v]" \
+        -c:v libx264 \
+        -pix_fmt yuv420p \
         -an \
         "$OUT_MP4" > /dev/null 2>&1
 fi
